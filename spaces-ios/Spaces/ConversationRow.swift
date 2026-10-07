@@ -1,17 +1,18 @@
 import SwiftUI
+import UIKit
 
 struct ConversationRow: View {
     let conversation: Conversation
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @ScaledMetric(relativeTo: .body) private var scaledAvatarSize: CGFloat = 56
+    @ScaledMetric(relativeTo: .body) private var scaledAvatarSize: CGFloat = 48
 
-    private var avatarSize: CGFloat { min(scaledAvatarSize, 72) }
+    private var avatarSize: CGFloat { min(scaledAvatarSize, 64) }
     private var usesLargeType: Bool { dynamicTypeSize.isAccessibilitySize }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: 10) {
             avatar
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 3) {
                 if usesLargeType {
                     title
                     HStack(spacing: 8) {
@@ -39,7 +40,7 @@ struct ConversationRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .alignmentGuide(.listRowSeparatorLeading) { _ in avatarSize + 12 }
+        .alignmentGuide(.listRowSeparatorLeading) { _ in avatarSize + 10 }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilitySummary)
     }
@@ -67,15 +68,30 @@ struct ConversationRow: View {
     }
 
     private func spaceMetadata(_ space: ProductSpace) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text("Пространство")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(ChatTheme.accent)
-            Text(space.sectionSummary)
-                .font(.caption)
-                .foregroundStyle(ChatTheme.secondaryText)
-                .lineLimit(usesLargeType ? 2 : 1)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 4) {
+                spaceLabel
+                Text("·").foregroundStyle(ChatTheme.secondaryText)
+                Text(space.sectionSummary).foregroundStyle(ChatTheme.secondaryText)
+            }
+            .font(.caption)
+            .fixedSize(horizontal: true, vertical: true)
+
+            VStack(alignment: .leading, spacing: 2) {
+                spaceLabel
+                Text(space.sectionSummary)
+                    .font(.caption)
+                    .foregroundStyle(ChatTheme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
+    }
+
+    private var spaceLabel: some View {
+        Text("Пространство")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(ChatTheme.accent)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var messagePreview: Text {
@@ -98,9 +114,9 @@ struct ConversationRow: View {
                 Text("\(conversation.unreadCount)")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .frame(minWidth: 24, minHeight: 24)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .frame(minWidth: 20, minHeight: 20)
                     .background(conversation.isMuted ? ChatTheme.mutedBadge : ChatTheme.accent, in: Capsule())
                     .fixedSize(horizontal: true, vertical: true)
             }
@@ -108,13 +124,33 @@ struct ConversationRow: View {
     }
 
     private var avatar: some View {
-        ZStack {
+        Group {
             if conversation.isSpace {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(ChatTheme.accent.gradient)
+                avatarArtwork
+                    .clipShape(RoundedRectangle(cornerRadius: avatarSize * 14 / 48, style: .continuous))
             } else {
-                Circle().fill(ChatTheme.color(conversation.avatarTint.rawValue).gradient)
+                avatarArtwork.clipShape(Circle())
             }
+        }
+        .frame(width: avatarSize, height: avatarSize)
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private var avatarArtwork: some View {
+        if let asset = conversation.corporateAvatar, let image = UIImage(named: asset.rawValue) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: avatarSize, height: avatarSize)
+        } else {
+            fallbackAvatar
+        }
+    }
+
+    private var fallbackAvatar: some View {
+        ZStack {
+            ChatTheme.color(conversation.avatarTint.rawValue)
             if conversation.isGroup {
                 Image(systemName: "person.2.fill")
                     .font(.title3.weight(.semibold))
@@ -126,7 +162,6 @@ struct ConversationRow: View {
             }
         }
         .frame(width: avatarSize, height: avatarSize)
-        .accessibilityHidden(true)
     }
 
     private var accessibilitySummary: String {

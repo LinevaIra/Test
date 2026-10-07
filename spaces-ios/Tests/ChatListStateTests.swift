@@ -2,6 +2,25 @@ import XCTest
 @testable import SpacesCore
 
 final class ChatListStateTests: XCTestCase {
+    func testCorporateAvatarsAreAssignedOnlyToSelectedConversations() {
+        let chats = ChatListState().conversations
+        let assignments = chats.filter { $0.corporateAvatar != nil }
+        XCTAssertEqual(assignments.map(\.title), ["Проект Эфир", "Команда продукта", "Обсуждение релиза"])
+        XCTAssertEqual(assignments.compactMap(\.corporateAvatar), [.ether, .productTeam, .releaseDiscussion])
+        XCTAssertEqual(chats.filter { $0.corporateAvatar == nil }.count, 5)
+        XCTAssertTrue(assignments.dropFirst().allSatisfy { $0.isGroup && !$0.isSpace })
+    }
+
+    func testNewChatHasFallbackAvatarAndRestoreKeepsCorporateAssignments() throws {
+        var state = ChatListState()
+        state.createChat(named: "Новый чат")
+        let chat = try XCTUnwrap(state.conversations.first { $0.title == "Новый чат" })
+        XCTAssertNil(chat.corporateAvatar)
+        XCTAssertEqual(chat.initials, "НЧ")
+        state.restore()
+        XCTAssertEqual(state.conversations.compactMap(\.corporateAvatar), [.ether, .productTeam, .releaseDiscussion])
+    }
+
     func testInitialListHasOneSpaceAndFourUnreadConversations() {
         let state = ChatListState()
         XCTAssertEqual(state.visibleConversations.count, 8)

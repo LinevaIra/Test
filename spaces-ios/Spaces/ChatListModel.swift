@@ -17,6 +17,12 @@ enum AvatarTint: String {
     case purple = "A466C9"
 }
 
+enum CorporateAvatar: String, CaseIterable {
+    case ether = "SpaceEtherAvatar"
+    case productTeam = "ProductTeamAvatar"
+    case releaseDiscussion = "ReleaseDiscussionAvatar"
+}
+
 struct SpaceChannel: Equatable {
     enum Visibility: Equatable {
         case `public`
@@ -68,6 +74,7 @@ struct Conversation: Identifiable, Equatable {
     let time: String
     let initials: String
     let avatarTint: AvatarTint
+    let corporateAvatar: CorporateAvatar?
     let isGroup: Bool
     let space: ProductSpace?
     var unreadCount: Int
@@ -78,7 +85,8 @@ struct Conversation: Identifiable, Equatable {
     var isSpace: Bool { space != nil }
 
     init(id: UUID = UUID(), title: String, sender: String? = nil, message: String,
-         time: String, initials: String, avatarTint: AvatarTint, isGroup: Bool = false,
+         time: String, initials: String, avatarTint: AvatarTint,
+         corporateAvatar: CorporateAvatar? = nil, isGroup: Bool = false,
          space: ProductSpace? = nil, unreadCount: Int = 0, isPinned: Bool = false,
          isMuted: Bool = false, order: Int) {
         self.id = id
@@ -88,6 +96,7 @@ struct Conversation: Identifiable, Equatable {
         self.time = time
         self.initials = initials
         self.avatarTint = avatarTint
+        self.corporateAvatar = corporateAvatar
         self.isGroup = isGroup
         self.space = space
         self.unreadCount = unreadCount
@@ -104,11 +113,13 @@ struct Conversation: Identifiable, Equatable {
     static let samples: [Conversation] = [
         Conversation(title: ProductSpace.ether.title, sender: "#general",
                      message: "Релиз запланирован на пятницу", time: "12:42", initials: "Э",
-                     avatarTint: .accent, space: .ether, unreadCount: 12, isPinned: true, order: 0),
+                     avatarTint: .accent, corporateAvatar: .ether, space: .ether,
+                     unreadCount: 12, isPinned: true, order: 0),
         Conversation(title: "Анна Смирнова", message: "Отлично, тогда до встречи!",
                      time: "12:38", initials: "АС", avatarTint: .orange, unreadCount: 2, order: 1),
         Conversation(title: "Команда продукта", sender: "Михаил", message: "Собрал заметки после встречи",
-                     time: "12:21", initials: "", avatarTint: .teal, isGroup: true, unreadCount: 5, order: 2),
+                     time: "12:21", initials: "", avatarTint: .teal, corporateAvatar: .productTeam,
+                     isGroup: true, unreadCount: 5, order: 2),
         Conversation(title: "Алексей", sender: "Вы", message: "Спасибо, посмотрю сегодня",
                      time: "11:54", initials: "АЛ", avatarTint: .blue, order: 3),
         Conversation(title: "Мария Козлова", message: "Отправила тебе фотографии",
@@ -119,7 +130,8 @@ struct Conversation: Identifiable, Equatable {
         Conversation(title: "Дмитрий", sender: "Вы", message: "Договорились 👍",
                      time: "вчера", initials: "ДМ", avatarTint: .purple, order: 6),
         Conversation(title: "Обсуждение релиза", sender: "Ольга", message: "Проверим финальный список задач",
-                     time: "вчера", initials: "", avatarTint: .orange, isGroup: true, order: 7)
+                     time: "вчера", initials: "", avatarTint: .orange,
+                     corporateAvatar: .releaseDiscussion, isGroup: true, order: 7)
     ]
 }
 

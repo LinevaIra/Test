@@ -37,13 +37,30 @@ struct ContentView: View {
                     .accessibilityHint("Действия со списком чатов")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        newChatName = ""
-                        isCreatingChat = true
-                    } label: {
-                        Image(systemName: "square.and.pencil")
+                    HStack(spacing: 8) {
+                        NavigationLink {
+                            activitiesEntry
+                        } label: {
+                            Image(systemName: "list.bullet.rectangle")
+                                .font(.system(size: 20, weight: .regular))
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .accessibilityLabel("Активности")
+                        .accessibilityHint("Открыть экран активностей")
+
+                        Button {
+                            newChatName = ""
+                            isCreatingChat = true
+                        } label: {
+                            Image(systemName: "square.and.pencil")
+                                .font(.system(size: 20, weight: .regular))
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .accessibilityLabel("Создать чат")
                     }
-                    .accessibilityLabel("Новый чат")
+                    .buttonStyle(.plain)
                 }
             }
             .alert("Новый чат", isPresented: $isCreatingChat) {
@@ -64,7 +81,7 @@ struct ContentView: View {
         List {
             ForEach(state.visibleConversations) { conversation in
                 ConversationRow(conversation: conversation)
-                    .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     .listRowBackground(Color.white)
                     .listRowSeparatorTint(ChatTheme.separator)
                     .contextMenu {
@@ -139,6 +156,16 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    /// Navigation entry only; activity content belongs to a separate specification.
+    private var activitiesEntry: some View {
+        Color.white
+            .ignoresSafeArea()
+            .navigationTitle("Активности")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.white, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
     }
 
     private var filterBar: some View {
