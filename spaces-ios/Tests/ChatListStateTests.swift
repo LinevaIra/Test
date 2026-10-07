@@ -11,17 +11,19 @@ final class ChatListStateTests: XCTestCase {
     func testInitialHierarchyAndAbbreviations() {
         let state = ChatListState()
         XCTAssertEqual(state.visibleConversations.count, 11)
-        XCTAssertEqual(state.conversations.filter { !$0.isChild }.count, 8)
+        XCTAssertEqual(state.conversations.filter { !$0.isChild && $0.isListedOnMain }.count, 8)
         XCTAssertEqual(state.unreadConversationCount, 4)
         XCTAssertEqual(state.visibleConversations.prefix(4).map(\.initials), ["СП", "ВО", "Р", "QA"])
         XCTAssertEqual(state.visibleConversations.dropFirst(4).map(\.initials), ["АС", "КП", "А", "МК", "В", "Д", "ОР"])
         XCTAssertEqual(state.conversation(spaceID)?.title, "Проект Сбер.продукт")
         XCTAssertEqual(state.conversation(spaceID)?.unreadCount, 12)
         let children = state.conversations.filter(\.isChild)
-        XCTAssertEqual(children.map(\.parentSpaceID), [spaceID, spaceID, spaceID])
-        XCTAssertEqual(children.map(\.unreadCount), [3, 5, 4])
-        XCTAssertEqual(children.map(\.kind), [.channel, .chat, .chat])
-        XCTAssertTrue(children.allSatisfy { !$0.isMuted })
+        XCTAssertEqual(children.count, 10)
+        let active = children.filter { !$0.isMuted && $0.unreadCount > 0 }
+        XCTAssertEqual(active.map(\.parentSpaceID), [spaceID, spaceID, spaceID])
+        XCTAssertEqual(active.map(\.unreadCount), [3, 5, 4])
+        XCTAssertEqual(active.map(\.kind), [.channel, .chat, .chat])
+        XCTAssertEqual(children.filter(\.isMuted).count, 4)
     }
 
     func testSpaceContainsPublicAnnouncementsAndPrivateSections() throws {
@@ -243,7 +245,9 @@ final class ChatListStateTests: XCTestCase {
             XCTAssertEqual(navigation.path.count, 1) // No intermediate space destination.
             XCTAssertEqual(state.conversation(conversation.id)?.unreadCount, conversation.unreadCount)
         }
-        XCTAssertNil(state.route(for: try XCTUnwrap(state.conversations.first { $0.title == "Анна Смирнова" })))
+        let anna = try XCTUnwrap(state.conversations.first { $0.title == "Анна Смирнова" })
+        XCTAssertEqual(state.route(for: anna), .personalDialogue(anna.id))
+        XCTAssertNil(state.route(for: try XCTUnwrap(state.conversations.first { $0.title == "Команда продукта" })))
     }
 
     func testActivitiesReturnToTheExactSourceAndDoNotDuplicate() throws {

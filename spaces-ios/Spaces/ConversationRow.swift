@@ -3,11 +3,14 @@ import SwiftUI
 struct ConversationRow: View {
     let conversation: Conversation
     var parentSpaceTitle: String? = nil
+    var showMentions = false
+    var isParentMuted = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .body) private var scaledAvatarSize: CGFloat = 48
 
     private var avatarSize: CGFloat { min(scaledAvatarSize, 64) }
     private var usesLargeType: Bool { dynamicTypeSize.isAccessibilitySize }
+    private var isMuted: Bool { conversation.isMuted || isParentMuted }
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -58,7 +61,7 @@ struct ConversationRow: View {
                     .foregroundStyle(ChatTheme.secondaryText)
                     .fixedSize()
             }
-            if conversation.isMuted {
+            if isMuted {
                 Image(systemName: "bell.slash.fill")
                     .font(.caption2)
                     .foregroundStyle(ChatTheme.secondaryText)
@@ -67,7 +70,7 @@ struct ConversationRow: View {
     }
 
     private var time: some View {
-        Text(conversation.time)
+        Text(conversation.displayTime())
             .font(.caption)
             .foregroundStyle(ChatTheme.secondaryText)
             .fixedSize(horizontal: true, vertical: true)
@@ -116,6 +119,11 @@ struct ConversationRow: View {
                     .font(.caption2)
                     .foregroundStyle(ChatTheme.secondaryText)
             }
+            if showMentions && conversation.unreadMentionCount > 0 {
+                Text("@")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(ChatTheme.accent)
+            }
             if conversation.unreadCount > 0 {
                 Text("\(conversation.unreadCount)")
                     .font(.caption.weight(.semibold))
@@ -123,7 +131,7 @@ struct ConversationRow: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .frame(minWidth: 20, minHeight: 20)
-                    .background(conversation.isMuted ? ChatTheme.mutedBadge : ChatTheme.accent, in: Capsule())
+                    .background(isMuted ? ChatTheme.mutedBadge : ChatTheme.accent, in: Capsule())
                     .fixedSize(horizontal: true, vertical: true)
             }
         }
@@ -146,7 +154,7 @@ struct ConversationRow: View {
         ZStack {
             ChatTheme.color(conversation.avatarTint.rawValue)
             Text(conversation.initials)
-                .font(.title3.weight(.semibold))
+                .font(.system(size: avatarSize * 0.4, weight: .semibold))
                 .foregroundStyle(.white)
         }
         .frame(width: avatarSize, height: avatarSize)
@@ -159,14 +167,51 @@ struct ConversationRow: View {
         }
         if let parentSpaceTitle {
             parts += [conversation.kind.rawValue, "В пространстве \(parentSpaceTitle)"]
+            if let section = conversation.section { parts.append("Раздел \(section)") }
         }
         if let sender = conversation.sender { parts.append(sender) }
-        parts += [conversation.message, conversation.time]
+        parts += [conversation.message, conversation.displayTime()]
         if conversation.unreadCount > 0 {
             parts.append("Непрочитанных сообщений: \(conversation.unreadCount)")
         }
         if conversation.isPinned { parts.append("Закреплено") }
-        if conversation.isMuted { parts.append("Без звука") }
+        if showMentions && conversation.unreadMentionCount > 0 {
+            parts.append("Непрочитанных упоминаний вас: \(conversation.unreadMentionCount)")
+        }
+        if isMuted { parts.append("Без звука") }
         return parts.joined(separator: ". ")
+    }
+}
+
+/// Identical actions update the shared model from either area inside a space.
+struct ReadMuteActions: ViewModifier {
+    let conversation: Conversation
+    let onRead: () -> Void
+    let onMute: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .contextMenu {
+                Button(action: onRead) {
+                    Label("Отметить прочитанным", systemImage: "checkmark.circle")
+                }
+                Button(action: onMute) {
+                    Label(conversation.isMuted ? "Включить звук" : "Без звука",
+                          systemImage: conversation.isMuted ? "bell" : "bell.slash")
+                }
+            }
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button(action: onRead) { Label("Прочитано", systemImage: "checkmark") }
+                    .tint(ChatTheme.accent)
+                Button(action: onMute) {
+                    Label(conversation.isMuted ? "Включить звук" : "Без звука",
+                          systemImage: conversation.isMuted ? "bell" : "bell.slash")
+                }
+                .tint(ChatTheme.secondaryText)
+            }
+            .accessibilityActions {
+                Button("Отметить прочитанным", action: onRead)
+                Button(conversation.isMuted ? "Включить звук" : "Без звука", action: onMute)
+            }
     }
 }

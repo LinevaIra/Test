@@ -77,6 +77,7 @@
 				<string>000000000000000000000016</string>
 				<string>000000000000000000000018</string>
 				<string>00000000000000000000001A</string>
+				<string>00000000000000000000001C</string>
 				<string>00000000000000000000000C</string>
 			</array>
 			<key>path</key>
@@ -177,6 +178,7 @@
 				<string>000000000000000000000017</string>
 				<string>000000000000000000000019</string>
 				<string>00000000000000000000001B</string>
+				<string>00000000000000000000001D</string>
 			</array>
 			<key>runOnlyForDeploymentPostprocessing</key>
 			<string>0</string>
@@ -465,6 +467,24 @@
 			<string>PBXBuildFile</string>
 			<key>fileRef</key>
 			<string>00000000000000000000001A</string>
+		</dict>
+		<key>00000000000000000000001C</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>SpaceHomeView.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>00000000000000000000001D</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+			<key>fileRef</key>
+			<string>00000000000000000000001C</string>
 		</dict>
 	</dict>
 	<key>rootObject</key>

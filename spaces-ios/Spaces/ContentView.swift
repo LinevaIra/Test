@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @State private var state = ChatListState()
     @State private var navigation = AppNavigationState()
+    @State private var spacePresentations: [UUID: SpaceHomeState] = [:]
     @State private var isCreatingChat = false
     @State private var newChatName = ""
 
@@ -182,9 +183,10 @@ struct ContentView: View {
     private func destination(for route: AppRoute) -> some View {
         switch route {
         case .space(let id):
-            if let space = state.conversation(id)?.space {
-                SpaceEntryView(space: space) { navigation.openActivities() }
-            }
+            SpaceHomeView(spaceID: id, state: $state, presentation: spacePresentation(for: id),
+                          onOpen: { conversation in
+                              if let route = state.route(for: conversation) { navigation.open(route) }
+                          }, onActivities: { navigation.openActivities() })
         case .dialogue(let spaceID, let conversationID, let kind):
             if let space = state.conversation(spaceID)?.space,
                let conversation = state.conversation(conversationID),
@@ -193,9 +195,18 @@ struct ContentView: View {
                     navigation.openActivities()
                 }
             }
+        case .personalDialogue(let id):
+            if let conversation = state.conversation(id), conversation.isPersonal, !conversation.isChild {
+                PersonalDialogueEntryView(conversation: conversation) { navigation.openActivities() }
+            }
         case .activities:
             ActivitiesEntryView()
         }
+    }
+
+    private func spacePresentation(for id: UUID) -> Binding<SpaceHomeState> {
+        Binding(get: { spacePresentations[id, default: SpaceHomeState()] },
+                set: { spacePresentations[id] = $0 })
     }
 
     private var filterBar: some View {
@@ -248,17 +259,17 @@ struct ContentView: View {
     }
 }
 
-// These are distinct navigation destinations; their content awaits separate specs.
-private struct SpaceEntryView: View {
-    let space: ProductSpace
+// Dialogue content awaits its own specification; IDs and source context already route correctly.
+private struct PersonalDialogueEntryView: View {
+    let conversation: Conversation
     let onActivities: () -> Void
 
     var body: some View {
         Color.white
             .ignoresSafeArea()
-            .accessibilityLabel("Пространство \(space.title)")
-            .accessibilityIdentifier("space.\(space.id.uuidString)")
-            .modifier(EntryHeader(title: space.title, onActivities: onActivities))
+            .accessibilityLabel("Личный диалог \(conversation.title)")
+            .accessibilityIdentifier("personal-dialogue.\(conversation.id.uuidString)")
+            .modifier(EntryHeader(title: conversation.title, onActivities: onActivities))
     }
 }
 
@@ -284,15 +295,16 @@ private struct ActivitiesEntryView: View {
     }
 }
 
-private struct EntryHeader: ViewModifier {
+struct EntryHeader: ViewModifier {
     let title: String
     var onActivities: (() -> Void)? = nil
+    var background: Color = .white
 
     func body(content: Content) -> some View {
         content
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.white, for: .navigationBar)
+            .toolbarBackground(background, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 if let onActivities {
