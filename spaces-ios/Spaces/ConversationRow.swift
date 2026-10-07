@@ -1,8 +1,8 @@
 import SwiftUI
-import UIKit
 
 struct ConversationRow: View {
     let conversation: Conversation
+    var parentSpaceTitle: String? = nil
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .body) private var scaledAvatarSize: CGFloat = 48
 
@@ -52,6 +52,12 @@ struct ConversationRow: View {
                 .foregroundStyle(ChatTheme.primaryText)
                 .lineLimit(usesLargeType ? 2 : 1)
                 .layoutPriority(1)
+            if conversation.isChild {
+                Text(conversation.kind.rawValue)
+                    .font(.caption2)
+                    .foregroundStyle(ChatTheme.secondaryText)
+                    .fixedSize()
+            }
             if conversation.isMuted {
                 Image(systemName: "bell.slash.fill")
                     .font(.caption2)
@@ -136,30 +142,12 @@ struct ConversationRow: View {
         .accessibilityHidden(true)
     }
 
-    @ViewBuilder
     private var avatarArtwork: some View {
-        if let asset = conversation.corporateAvatar, let image = UIImage(named: asset.rawValue) {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-                .frame(width: avatarSize, height: avatarSize)
-        } else {
-            fallbackAvatar
-        }
-    }
-
-    private var fallbackAvatar: some View {
         ZStack {
             ChatTheme.color(conversation.avatarTint.rawValue)
-            if conversation.isGroup {
-                Image(systemName: "person.2.fill")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.white)
-            } else {
-                Text(conversation.initials)
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.white)
-            }
+            Text(conversation.initials)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.white)
         }
         .frame(width: avatarSize, height: avatarSize)
     }
@@ -168,6 +156,9 @@ struct ConversationRow: View {
         var parts = [conversation.title]
         if let space = conversation.space {
             parts += ["Пространство", space.sectionSummary]
+        }
+        if let parentSpaceTitle {
+            parts += [conversation.kind.rawValue, "В пространстве \(parentSpaceTitle)"]
         }
         if let sender = conversation.sender { parts.append(sender) }
         parts += [conversation.message, conversation.time]

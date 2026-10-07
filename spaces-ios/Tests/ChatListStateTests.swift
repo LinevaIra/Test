@@ -2,36 +2,30 @@ import XCTest
 @testable import SpacesCore
 
 final class ChatListStateTests: XCTestCase {
-    func testCorporateAvatarsAreAssignedOnlyToSelectedConversations() {
-        let chats = ChatListState().conversations
-        let assignments = chats.filter { $0.corporateAvatar != nil }
-        XCTAssertEqual(assignments.map(\.title), ["Проект Эфир", "Команда продукта", "Обсуждение релиза"])
-        XCTAssertEqual(assignments.compactMap(\.corporateAvatar), [.ether, .productTeam, .releaseDiscussion])
-        XCTAssertEqual(chats.filter { $0.corporateAvatar == nil }.count, 5)
-        XCTAssertTrue(assignments.dropFirst().allSatisfy { $0.isGroup && !$0.isSpace })
+    private let spaceID = ProductSpace.sber.id
+
+    private func child(_ title: String, in state: ChatListState) throws -> Conversation {
+        try XCTUnwrap(state.conversations.first { $0.isChild && $0.title.hasPrefix(title) })
     }
 
-    func testNewChatHasFallbackAvatarAndRestoreKeepsCorporateAssignments() throws {
-        var state = ChatListState()
-        state.createChat(named: "Новый чат")
-        let chat = try XCTUnwrap(state.conversations.first { $0.title == "Новый чат" })
-        XCTAssertNil(chat.corporateAvatar)
-        XCTAssertEqual(chat.initials, "НЧ")
-        state.restore()
-        XCTAssertEqual(state.conversations.compactMap(\.corporateAvatar), [.ether, .productTeam, .releaseDiscussion])
-    }
-
-    func testInitialListHasOneSpaceAndFourUnreadConversations() {
+    func testInitialHierarchyAndAbbreviations() {
         let state = ChatListState()
-        XCTAssertEqual(state.visibleConversations.count, 8)
-        XCTAssertEqual(state.conversations.filter(\.isSpace).count, 1)
+        XCTAssertEqual(state.visibleConversations.count, 11)
+        XCTAssertEqual(state.conversations.filter { !$0.isChild }.count, 8)
         XCTAssertEqual(state.unreadConversationCount, 4)
-        XCTAssertEqual(state.visibleConversations.first?.title, "Проект Эфир")
-        XCTAssertEqual(state.conversations.map(\.unreadCount), [12, 2, 5, 0, 0, 8, 0, 0])
+        XCTAssertEqual(state.visibleConversations.prefix(4).map(\.initials), ["СП", "ВО", "Р", "QA"])
+        XCTAssertEqual(state.visibleConversations.dropFirst(4).map(\.initials), ["АС", "КП", "А", "МК", "В", "Д", "ОР"])
+        XCTAssertEqual(state.conversation(spaceID)?.title, "Проект Сбер.продукт")
+        XCTAssertEqual(state.conversation(spaceID)?.unreadCount, 12)
+        let children = state.conversations.filter(\.isChild)
+        XCTAssertEqual(children.map(\.parentSpaceID), [spaceID, spaceID, spaceID])
+        XCTAssertEqual(children.map(\.unreadCount), [3, 5, 4])
+        XCTAssertEqual(children.map(\.kind), [.channel, .chat, .chat])
+        XCTAssertTrue(children.allSatisfy { !$0.isMuted })
     }
 
-    func testSpaceContainsPublicAnnouncementsAndPrivateChannelsInEachSection() throws {
-        let space = try XCTUnwrap(ChatListState().conversations.first?.space)
+    func testSpaceContainsPublicAnnouncementsAndPrivateSections() throws {
+        let space = try XCTUnwrap(ChatListState().conversation(spaceID)?.space)
         XCTAssertEqual(space.announcementChannel.title, "#general")
         XCTAssertEqual(space.announcementChannel.visibility, .public)
         XCTAssertEqual(space.announcementChannel.purpose, "Важные объявления")
@@ -42,16 +36,45 @@ final class ChatListStateTests: XCTestCase {
         }
     }
 
-    func testSearchReturnsSpaceForNestedSectionsAndChannels() {
+    func testFiltersKeepParentsAndDoNotDoubleCountChildren() {
         var state = ChatListState()
-        for term in ["эФиР", "ПОЧТА", "РО", "qa", "ВКС", "#general", "Разработка"] {
-            state.query = term
-            XCTAssertTrue(state.visibleConversations.contains { $0.title == "Проект Эфир" }, term)
-            XCTAssertFalse(state.visibleConversations.contains { $0.title == "QA" }, term)
-        }
+        state.filter = .unread
+        XCTAssertEqual(state.visibleConversations.count, 7)
+        XCTAssertEqual(state.unreadConversationCount, 4)
+        XCTAssertEqual(state.visibleConversations.filter { !$0.isChild }.count, 4)
+        state.filter = .spaces
+        XCTAssertEqual(state.visibleConversations.count, 4)
+        XCTAssertTrue(state.visibleConversations.dropFirst().allSatisfy { $0.parentSpaceID == spaceID })
     }
 
-    func testSearchMatchesSenderAndMessageAndRespectsFilter() {
+    func testSearchFindsSpaceVisibleChildOrHiddenContext() {
+        var state = ChatListState()
+        state.query = "  сБеР  "
+        XCTAssertEqual(state.visibleConversations.count, 4)
+        for (query, expectedChildren) in [("QA", ["QA"]), ("ПОЧТА", []), ("РО", []), ("паша", ["Разработка"])] {
+            state.query = query
+            let block = state.visibleConversations.filter { $0.isSpace || $0.isChild }
+            XCTAssertEqual(block.first?.id, spaceID, query)
+            XCTAssertEqual(block.dropFirst().map(\.title), expectedChildren, query)
+        }
+        state.query = "объявления"
+        XCTAssertEqual(state.visibleConversations.dropFirst().map(\.initials), ["ВО"])
+    }
+
+    func testSearchNeverRevealsMutedOrReadChildren() throws {
+        var state = ChatListState()
+        let qa = try child("QA", in: state)
+        state.toggleMuted(qa.id)
+        state.query = "QA"
+        XCTAssertEqual(state.visibleConversations.map(\.id), [spaceID])
+        state.toggleMuted(qa.id)
+        state.markRead(qa.id)
+        XCTAssertEqual(state.visibleConversations.map(\.id), [spaceID])
+        state.query = "Сбер"
+        XCTAssertEqual(state.visibleConversations.count, 3)
+    }
+
+    func testSearchMatchesSenderMessageAndRespectsFilter() {
         var state = ChatListState()
         state.query = "  фотографии  "
         XCTAssertEqual(state.visibleConversations.map(\.title), ["Мария Козлова"])
@@ -60,54 +83,120 @@ final class ChatListStateTests: XCTestCase {
         state.filter = .all
         state.query = "михаил"
         XCTAssertEqual(state.visibleConversations.map(\.title), ["Команда продукта"])
+        state.filter = .spaces
+        XCTAssertTrue(state.visibleConversations.isEmpty)
+        state.filter = .all
         state.query = "несуществующий запрос 987"
         XCTAssertTrue(state.visibleConversations.isEmpty)
         state.query = ""
-        XCTAssertEqual(state.visibleConversations.count, 8)
+        XCTAssertEqual(state.visibleConversations.count, 11)
     }
 
-    func testReadActionRemovesSpaceFromUnreadButKeepsItInSpaceFilter() throws {
+    func testReadingChildHidesItAndRecalculatesParent() throws {
         var state = ChatListState()
-        let id = try XCTUnwrap(state.conversations.first?.id)
-        state.markRead(id)
+        let general = try child("#general", in: state)
+        state.markRead(general.id)
+        XCTAssertEqual(state.conversation(general.id)?.unreadCount, 0)
+        XCTAssertFalse(state.visibleConversations.contains { $0.id == general.id })
+        XCTAssertEqual(state.conversation(spaceID)?.unreadCount, 9)
+        XCTAssertEqual(state.visibleConversations.count, 10)
+        XCTAssertEqual(state.unreadConversationCount, 4)
+    }
+
+    func testReadingSpaceClearsEveryChildButRetainsTheirIdentity() throws {
+        var state = ChatListState()
+        let ids = state.conversations.filter(\.isChild).map(\.id)
+        state.toggleMuted(try child("QA", in: state).id)
+        state.markRead(spaceID)
+        XCTAssertTrue(ids.allSatisfy { state.conversation($0)?.unreadCount == 0 })
         state.filter = .unread
-        XCTAssertEqual(state.unreadConversationCount, 3)
         XCTAssertEqual(state.visibleConversations.count, 3)
-        XCTAssertFalse(state.visibleConversations.contains { $0.id == id })
+        XCTAssertEqual(state.unreadConversationCount, 3)
         state.filter = .spaces
-        XCTAssertEqual(state.visibleConversations.map(\.title), ["Проект Эфир"])
-        XCTAssertEqual(state.visibleConversations.first?.unreadCount, 0)
+        XCTAssertEqual(state.visibleConversations.map(\.id), [spaceID])
+        XCTAssertEqual(state.conversation(spaceID)?.unreadCount, 0)
+        XCTAssertEqual(state.conversations.filter(\.isChild).map(\.id), ids)
     }
 
-    func testPinAndMuteAreReversibleAndDoNotMarkRead() throws {
+    func testMuteChildPreservesUnreadAndReturnsOnlyIfUnread() throws {
         var state = ChatListState()
-        let initialOrder = state.visibleConversations.map(\.id)
-        let id = try XCTUnwrap(state.conversations.first { $0.title == "Выходные" }?.id)
-        state.togglePinned(id)
-        XCTAssertEqual(state.visibleConversations.prefix(2).map(\.title), ["Проект Эфир", "Выходные"])
-        state.toggleMuted(id)
-        let chat = try XCTUnwrap(state.conversations.first { $0.id == id })
-        XCTAssertFalse(chat.isMuted)
-        XCTAssertEqual(chat.unreadCount, 8)
-        state.togglePinned(id)
-        state.toggleMuted(id)
-        XCTAssertEqual(state.visibleConversations.map(\.id), initialOrder)
-        XCTAssertTrue(state.conversations.first { $0.id == id }?.isMuted == true)
+        let development = try child("Разработка", in: state)
+        state.toggleMuted(development.id)
+        XCTAssertFalse(state.visibleConversations.contains { $0.id == development.id })
+        XCTAssertEqual(state.conversation(development.id)?.unreadCount, 5)
+        XCTAssertEqual(state.conversation(spaceID)?.unreadCount, 12)
+        state.toggleMuted(development.id)
+        XCTAssertTrue(state.visibleConversations.contains { $0.id == development.id })
+        state.markRead(development.id)
+        state.toggleMuted(development.id)
+        state.toggleMuted(development.id)
+        XCTAssertFalse(state.visibleConversations.contains { $0.id == development.id })
+        XCTAssertEqual(state.conversation(spaceID)?.unreadCount, 7)
     }
 
-    func testCreatingChatTrimsTitleClearsSearchAndKeepsSpacePinnedFirst() throws {
+    func testMuteParentPreservesIndividualChildSettings() throws {
+        var state = ChatListState()
+        let qa = try child("QA", in: state)
+        state.toggleMuted(qa.id)
+        state.toggleMuted(spaceID)
+        XCTAssertFalse(state.visibleConversations.contains(where: \.isChild))
+        XCTAssertEqual(state.conversation(spaceID)?.unreadCount, 12)
+        state.toggleMuted(spaceID)
+        XCTAssertEqual(state.visibleConversations.filter(\.isChild).count, 2)
+        XCTAssertTrue(state.conversation(qa.id)?.isMuted == true)
+    }
+
+    func testEligibilityIsAConditionAndNotALimitOfThree() {
+        let extra = Conversation(title: "Новый канал", message: "Новое сообщение", time: "сейчас",
+                                 initials: "НК", avatarTint: .accent, parentSpaceID: spaceID,
+                                 kind: .channel, unreadCount: 2, order: 3)
+        let orphan = Conversation(title: "Без родителя", message: "", time: "", initials: "БР",
+                                  avatarTint: .accent, parentSpaceID: UUID(), unreadCount: 3, order: 4)
+        var state = ChatListState(conversations: Conversation.samples + [extra, orphan])
+        XCTAssertEqual(state.visibleConversations.filter(\.isChild).count, 4)
+        XCTAssertFalse(state.visibleConversations.contains { $0.id == orphan.id })
+        XCTAssertNil(state.route(for: orphan))
+        XCTAssertEqual(state.conversation(spaceID)?.unreadCount, 14)
+        state.toggleMuted(extra.id)
+        XCTAssertEqual(state.visibleConversations.filter(\.isChild).count, 3)
+        XCTAssertEqual(state.conversation(spaceID)?.unreadCount, 14)
+        state.markRead(extra.id)
+        state.toggleMuted(extra.id)
+        XCTAssertEqual(state.visibleConversations.filter(\.isChild).count, 3)
+        XCTAssertEqual(state.conversation(spaceID)?.unreadCount, 12)
+    }
+
+    func testPinMovesTheWholeBlockAndDoesNotPinChildren() throws {
+        var state = ChatListState()
+        let anna = try XCTUnwrap(state.conversations.first { $0.title == "Анна Смирнова" })
+        let qa = try child("QA", in: state)
+        state.togglePinned(anna.id)
+        state.togglePinned(spaceID)
+        XCTAssertEqual(state.visibleConversations.first?.id, anna.id)
+        XCTAssertEqual(state.visibleConversations.dropFirst().prefix(4).map(\.initials), ["СП", "ВО", "Р", "QA"])
+        let before = state.conversations
+        state.togglePinned(qa.id)
+        XCTAssertEqual(state.conversations, before)
+        state.togglePinned(spaceID)
+        XCTAssertEqual(state.visibleConversations.prefix(4).map(\.initials), ["СП", "ВО", "Р", "QA"])
+    }
+
+    func testCreatingChatTrimsNameAndUsesWholeCharacterAbbreviations() throws {
         var state = ChatListState()
         state.query = "qa"
         state.filter = .spaces
-        XCTAssertTrue(state.createChat(named: "  Новый чат \n"))
+        XCTAssertTrue(state.createChat(named: "  Новая команда \n"))
+        let chat = try XCTUnwrap(state.visibleConversations.dropFirst(4).first)
+        XCTAssertEqual(chat.title, "Новая команда")
+        XCTAssertEqual(chat.initials, "НК")
+        XCTAssertEqual(chat.unreadCount, 0)
+        XCTAssertFalse(chat.isChild)
         XCTAssertEqual(state.query, "")
         XCTAssertEqual(state.filter, .all)
-        XCTAssertEqual(state.visibleConversations.prefix(2).map(\.title), ["Проект Эфир", "Новый чат"])
-        let chat = try XCTUnwrap(state.visibleConversations.dropFirst().first)
-        XCTAssertEqual(chat.message, "Пока нет сообщений")
-        XCTAssertEqual(chat.initials, "НЧ")
-        XCTAssertFalse(chat.isSpace)
-        XCTAssertEqual(chat.unreadCount, 0)
+        state.createChat(named: "Александр")
+        XCTAssertEqual(state.visibleConversations.dropFirst(4).first?.initials, "А")
+        state.createChat(named: "E\u{301}quipe produit")
+        XCTAssertEqual(state.visibleConversations.dropFirst(4).first?.initials, "E\u{301}P")
     }
 
     func testWhitespaceNameIsRejectedWithoutChangingState() {
@@ -121,12 +210,12 @@ final class ChatListStateTests: XCTestCase {
         XCTAssertEqual(state.filter, .spaces)
     }
 
-    func testRestoreResetsChangesAndNewStateDoesNotPersistThem() throws {
+    func testRestoreAndNewLaunchResetStateAndHierarchy() throws {
         var state = ChatListState()
         let original = state.conversations
-        let id = try XCTUnwrap(original.first?.id)
-        state.toggleMuted(id)
-        state.togglePinned(id)
+        state.toggleMuted(try child("QA", in: state).id)
+        state.toggleMuted(spaceID)
+        state.togglePinned(spaceID)
         state.createChat(named: "Временный чат")
         state.markAllRead()
         state.filter = .unread
@@ -136,8 +225,53 @@ final class ChatListStateTests: XCTestCase {
         state.query = "Временный"
         state.restore()
         XCTAssertEqual(state.conversations, original)
+        XCTAssertEqual(state.visibleConversations.count, 11)
         XCTAssertEqual(state.query, "")
         XCTAssertEqual(state.filter, .all)
         XCTAssertEqual(state.unreadConversationCount, 4)
+    }
+
+    func testSpaceAndChildrenHaveDistinctExactDestinationsWithoutMarkingRead() throws {
+        let state = ChatListState()
+        let space = try XCTUnwrap(state.conversation(spaceID))
+        XCTAssertEqual(state.route(for: space), .space(spaceID))
+        for conversation in state.conversations.filter(\.isChild) {
+            XCTAssertEqual(state.route(for: conversation),
+                           .dialogue(spaceID: spaceID, conversationID: conversation.id, kind: conversation.kind))
+            var navigation = AppNavigationState()
+            navigation.open(try XCTUnwrap(state.route(for: conversation)))
+            XCTAssertEqual(navigation.path.count, 1) // No intermediate space destination.
+            XCTAssertEqual(state.conversation(conversation.id)?.unreadCount, conversation.unreadCount)
+        }
+        XCTAssertNil(state.route(for: try XCTUnwrap(state.conversations.first { $0.title == "Анна Смирнова" })))
+    }
+
+    func testActivitiesReturnToTheExactSourceAndDoNotDuplicate() throws {
+        let state = ChatListState()
+        let qa = try child("QA", in: state)
+        let sources: [AppRoute?] = [nil, .space(spaceID), state.route(for: qa)]
+        for source in sources {
+            var navigation = AppNavigationState()
+            if let source { navigation.open(source) }
+            let before = navigation.path
+            navigation.openActivities()
+            navigation.openActivities()
+            XCTAssertEqual(navigation.path, before + [.activities])
+            navigation.goBack()
+            XCTAssertEqual(navigation.path, before)
+            navigation.goBack()
+            navigation.goBack()
+            XCTAssertTrue(navigation.path.isEmpty)
+        }
+    }
+
+    func testUnknownActionsAreNoOps() {
+        var state = ChatListState()
+        let before = state.conversations
+        let unknown = UUID()
+        state.markRead(unknown)
+        state.toggleMuted(unknown)
+        state.togglePinned(unknown)
+        XCTAssertEqual(state.conversations, before)
     }
 }

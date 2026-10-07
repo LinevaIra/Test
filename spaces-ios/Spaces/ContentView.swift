@@ -2,11 +2,12 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var state = ChatListState()
+    @State private var navigation = AppNavigationState()
     @State private var isCreatingChat = false
     @State private var newChatName = ""
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigation.path) {
             VStack(spacing: 0) {
                 filterBar
                 conversationList
@@ -38,16 +39,7 @@ struct ContentView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 8) {
-                        NavigationLink {
-                            activitiesEntry
-                        } label: {
-                            Image(systemName: "list.bullet.rectangle")
-                                .font(.system(size: 20, weight: .regular))
-                                .frame(width: 44, height: 44)
-                                .contentShape(Rectangle())
-                        }
-                        .accessibilityLabel("Активности")
-                        .accessibilityHint("Открыть экран активностей")
+                        ActivitiesButton { navigation.openActivities() }
 
                         Button {
                             newChatName = ""
@@ -62,6 +54,9 @@ struct ContentView: View {
                     }
                     .buttonStyle(.plain)
                 }
+            }
+            .navigationDestination(for: AppRoute.self) { route in
+                destination(for: route)
             }
             .alert("Новый чат", isPresented: $isCreatingChat) {
                 TextField("Название", text: $newChatName)
@@ -80,8 +75,9 @@ struct ContentView: View {
     private var conversationList: some View {
         List {
             ForEach(state.visibleConversations) { conversation in
-                ConversationRow(conversation: conversation)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                conversationEntry(conversation)
+                    .listRowInsets(EdgeInsets(top: 8, leading: conversation.isChild ? 36 : 16,
+                                              bottom: 8, trailing: 16))
                     .listRowBackground(Color.white)
                     .listRowSeparatorTint(ChatTheme.separator)
                     .contextMenu {
@@ -90,11 +86,13 @@ struct ContentView: View {
                         } label: {
                             Label("Отметить прочитанным", systemImage: "checkmark.circle")
                         }
-                        Button {
-                            state.togglePinned(conversation.id)
-                        } label: {
-                            Label(conversation.isPinned ? "Открепить" : "Закрепить",
-                                  systemImage: conversation.isPinned ? "pin.slash" : "pin")
+                        if !conversation.isChild {
+                            Button {
+                                state.togglePinned(conversation.id)
+                            } label: {
+                                Label(conversation.isPinned ? "Открепить" : "Закрепить",
+                                      systemImage: conversation.isPinned ? "pin.slash" : "pin")
+                            }
                         }
                         Button {
                             state.toggleMuted(conversation.id)
@@ -119,22 +117,26 @@ struct ContentView: View {
                         .tint(ChatTheme.secondaryText)
                     }
                     .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                        Button {
-                            state.togglePinned(conversation.id)
-                        } label: {
-                            Label(conversation.isPinned ? "Открепить" : "Закрепить",
-                                  systemImage: conversation.isPinned ? "pin.slash" : "pin")
+                        if !conversation.isChild {
+                            Button {
+                                state.togglePinned(conversation.id)
+                            } label: {
+                                Label(conversation.isPinned ? "Открепить" : "Закрепить",
+                                      systemImage: conversation.isPinned ? "pin.slash" : "pin")
+                            }
+                            .tint(ChatTheme.accent)
                         }
-                        .tint(ChatTheme.accent)
                     }
-                    .accessibilityAction(named: Text("Отметить прочитанным")) {
-                        state.markRead(conversation.id)
-                    }
-                    .accessibilityAction(named: Text(conversation.isPinned ? "Открепить" : "Закрепить")) {
-                        state.togglePinned(conversation.id)
-                    }
-                    .accessibilityAction(named: Text(conversation.isMuted ? "Включить звук" : "Без звука")) {
-                        state.toggleMuted(conversation.id)
+                    .accessibilityActions {
+                        Button("Отметить прочитанным") { state.markRead(conversation.id) }
+                        if !conversation.isChild {
+                            Button(conversation.isPinned ? "Открепить" : "Закрепить") {
+                                state.togglePinned(conversation.id)
+                            }
+                        }
+                        Button(conversation.isMuted ? "Включить звук" : "Без звука") {
+                            state.toggleMuted(conversation.id)
+                        }
                     }
             }
         }
@@ -158,14 +160,42 @@ struct ContentView: View {
         }
     }
 
-    /// Navigation entry only; activity content belongs to a separate specification.
-    private var activitiesEntry: some View {
-        Color.white
-            .ignoresSafeArea()
-            .navigationTitle("Активности")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.white, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+    @ViewBuilder
+    private func conversationEntry(_ conversation: Conversation) -> some View {
+        let parentTitle = conversation.parentSpaceID.flatMap { state.conversation($0)?.title }
+        if let route = state.route(for: conversation) {
+            Button {
+                navigation.open(route)
+            } label: {
+                ConversationRow(conversation: conversation, parentSpaceTitle: parentTitle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(conversation.isSpace ? "Открыть пространство" : "Открыть диалог")
+        } else {
+            ConversationRow(conversation: conversation)
+        }
+    }
+
+    @ViewBuilder
+    private func destination(for route: AppRoute) -> some View {
+        switch route {
+        case .space(let id):
+            if let space = state.conversation(id)?.space {
+                SpaceEntryView(space: space) { navigation.openActivities() }
+            }
+        case .dialogue(let spaceID, let conversationID, let kind):
+            if let space = state.conversation(spaceID)?.space,
+               let conversation = state.conversation(conversationID),
+               conversation.parentSpaceID == spaceID, conversation.kind == kind {
+                DialogueEntryView(space: space, conversation: conversation) {
+                    navigation.openActivities()
+                }
+            }
+        case .activities:
+            ActivitiesEntryView()
+        }
     }
 
     private var filterBar: some View {
@@ -215,6 +245,125 @@ struct ContentView: View {
         .accessibilityLabel(filter.rawValue)
         .accessibilityValue(filter == .unread ? "Непрочитанных чатов: \(state.unreadConversationCount)" : "")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+// These are distinct navigation destinations; their content awaits separate specs.
+private struct SpaceEntryView: View {
+    let space: ProductSpace
+    let onActivities: () -> Void
+
+    var body: some View {
+        Color.white
+            .ignoresSafeArea()
+            .accessibilityLabel("Пространство \(space.title)")
+            .accessibilityIdentifier("space.\(space.id.uuidString)")
+            .modifier(EntryHeader(title: space.title, onActivities: onActivities))
+    }
+}
+
+private struct DialogueEntryView: View {
+    let space: ProductSpace
+    let conversation: Conversation
+    let onActivities: () -> Void
+
+    var body: some View {
+        Color.white
+            .ignoresSafeArea()
+            .accessibilityLabel("\(conversation.kind.rawValue) \(conversation.title), в пространстве \(space.title)")
+            .accessibilityIdentifier("dialogue.\(conversation.id.uuidString)")
+            .modifier(EntryHeader(title: space.title, onActivities: onActivities))
+    }
+}
+
+private struct ActivitiesEntryView: View {
+    var body: some View {
+        Color.white
+            .ignoresSafeArea()
+            .modifier(EntryHeader(title: "Активности"))
+    }
+}
+
+private struct EntryHeader: ViewModifier {
+    let title: String
+    var onActivities: (() -> Void)? = nil
+
+    func body(content: Content) -> some View {
+        content
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.white, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                if let onActivities {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        ActivitiesButton(action: onActivities)
+                    }
+                }
+            }
+    }
+}
+
+private struct ActivitiesButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ActivityBubblesIcon()
+                .foregroundStyle(ChatTheme.accent)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Активности")
+        .accessibilityHint("Открыть экран активностей")
+    }
+}
+
+/// Vector drawing matching R4's silhouette, with no bitmap, badge or animation.
+private struct ActivityBubblesIcon: View {
+    private let stroke = StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
+
+    var body: some View {
+        ZStack {
+            ActivityBubbleShape()
+                .stroke(style: stroke)
+                .scaleEffect(x: -1, y: 1)
+                .frame(width: 17, height: 17)
+                .offset(x: 4, y: 4)
+            ActivityBubbleShape()
+                .fill(.white)
+                .overlay { ActivityBubbleShape().stroke(style: stroke) }
+                .frame(width: 20, height: 18)
+                .overlay(alignment: .center) {
+                    HStack(spacing: 2) {
+                        ForEach(0..<3) { _ in Circle().frame(width: 2, height: 2) }
+                    }
+                    .offset(y: -1)
+                }
+                .offset(x: -2, y: -2)
+        }
+        .frame(width: 24, height: 24)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct ActivityBubbleShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.minX + x * rect.width, y: rect.minY + y * rect.height)
+        }
+        var path = Path()
+        path.move(to: point(0.5, 0.04))
+        path.addCurve(to: point(0.96, 0.44), control1: point(0.77, 0.04), control2: point(0.96, 0.18))
+        path.addCurve(to: point(0.5, 0.84), control1: point(0.96, 0.7), control2: point(0.77, 0.84))
+        path.addQuadCurve(to: point(0.31, 0.81), control: point(0.4, 0.84))
+        path.addLine(to: point(0.04, 0.96))
+        path.addLine(to: point(0.13, 0.67))
+        path.addCurve(to: point(0.04, 0.44), control1: point(0.07, 0.61), control2: point(0.04, 0.53))
+        path.addCurve(to: point(0.5, 0.04), control1: point(0.04, 0.18), control2: point(0.23, 0.04))
+        path.closeSubpath()
+        return path
     }
 }
 
