@@ -79,6 +79,11 @@
 				<string>00000000000000000000001A</string>
 				<string>00000000000000000000001C</string>
 				<string>00000000000000000000000C</string>
+				<string>00000000000000000000001E</string>
+				<string>000000000000000000000020</string>
+				<string>000000000000000000000022</string>
+				<string>000000000000000000000024</string>
+				<string>000000000000000000000026</string>
 			</array>
 			<key>path</key>
 			<string>Spaces</string>
@@ -179,6 +184,11 @@
 				<string>000000000000000000000019</string>
 				<string>00000000000000000000001B</string>
 				<string>00000000000000000000001D</string>
+				<string>00000000000000000000001F</string>
+				<string>000000000000000000000021</string>
+				<string>000000000000000000000023</string>
+				<string>000000000000000000000025</string>
+				<string>000000000000000000000027</string>
 			</array>
 			<key>runOnlyForDeploymentPostprocessing</key>
 			<string>0</string>
@@ -485,6 +495,96 @@
 			<string>PBXBuildFile</string>
 			<key>fileRef</key>
 			<string>00000000000000000000001C</string>
+		</dict>
+		<key>00000000000000000000001E</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>ActivityModel.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>00000000000000000000001F</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+			<key>fileRef</key>
+			<string>00000000000000000000001E</string>
+		</dict>
+		<key>000000000000000000000020</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>ScreenChrome.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>000000000000000000000021</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+			<key>fileRef</key>
+			<string>000000000000000000000020</string>
+		</dict>
+		<key>000000000000000000000022</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>DialogueView.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>000000000000000000000023</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+			<key>fileRef</key>
+			<string>000000000000000000000022</string>
+		</dict>
+		<key>000000000000000000000024</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>TeamResourcesView.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>000000000000000000000025</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+			<key>fileRef</key>
+			<string>000000000000000000000024</string>
+		</dict>
+		<key>000000000000000000000026</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>ActivitiesView.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>000000000000000000000027</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+			<key>fileRef</key>
+			<string>000000000000000000000026</string>
 		</dict>
 	</dict>
 	<key>rootObject</key>

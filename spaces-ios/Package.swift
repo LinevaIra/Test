@@ -7,8 +7,8 @@ let package = Package(
     products: [.library(name: "SpacesCore", targets: ["SpacesCore"])],
     targets: [
         .target(name: "SpacesCore", path: "Spaces",
-                exclude: ["SpacesApp.swift", "ContentView.swift", "ConversationRow.swift", "ChatTheme.swift", "SpaceHomeView.swift", "Assets.xcassets"],
-                sources: ["ChatListModel.swift"]),
+                exclude: ["SpacesApp.swift", "ContentView.swift", "ConversationRow.swift", "ChatTheme.swift", "SpaceHomeView.swift", "ScreenChrome.swift", "DialogueView.swift", "TeamResourcesView.swift", "ActivitiesView.swift", "Assets.xcassets"],
+                sources: ["ChatListModel.swift", "ActivityModel.swift"]),
         .testTarget(name: "SpacesCoreTests", dependencies: ["SpacesCore"], path: "Tests")
     ]
 )

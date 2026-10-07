@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SpaceHomeView: View {
     let spaceID: UUID
@@ -7,7 +8,7 @@ struct SpaceHomeView: View {
     let onOpen: (Conversation) -> Void
     let onActivities: () -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @ScaledMetric(relativeTo: .body) private var scaledAvatarSize: CGFloat = 48
+    @State private var activeDragToken: String?
 
     private var space: ProductSpace? { state.conversation(spaceID)?.space }
     private var workCoordinate: String { "space.work.\(spaceID)" }
@@ -22,15 +23,10 @@ struct SpaceHomeView: View {
                         combinedList(space)
                     } else {
                         VStack(spacing: 0) {
-                            identityHeader(space)
-                            GeometryReader { areas in
-                                VStack(spacing: 0) {
-                                    workPanel(space)
-                                        .frame(height: areas.size.height * 0.6)
-                                    personalPanel
-                                        .frame(height: areas.size.height * 0.4)
-                                }
-                            }
+                            workPanel(space)
+                                .frame(maxHeight: .infinity)
+                            personalPanel
+                                .frame(height: presentation.personalExpanded ? geometry.size.height * 0.4 : 54)
                         }
                     }
                 }
@@ -40,44 +36,15 @@ struct SpaceHomeView: View {
         }
         .background(.white)
         .accessibilityIdentifier("space.\(spaceID.uuidString)")
-        .modifier(EntryHeader(title: space?.title ?? "Пространство",
-                              onActivities: onActivities, background: ChatTheme.accentBackground))
-    }
-
-    private func identityHeader(_ space: ProductSpace) -> some View {
-        HStack(spacing: 12) {
-            Text(state.conversation(spaceID)?.initials ?? "СП")
-                .font(.system(size: min(scaledAvatarSize, 64) * 0.4, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: min(scaledAvatarSize, 64), height: min(scaledAvatarSize, 64))
-                .background(ChatTheme.accent,
-                            in: RoundedRectangle(cornerRadius: min(scaledAvatarSize, 64) * 14 / 48,
-                                                 style: .continuous))
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Пространство")
-                    .font(.headline)
-                    .foregroundStyle(ChatTheme.accent)
-                Text(space.sectionSummary)
-                    .font(.subheadline)
-                    .foregroundStyle(ChatTheme.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ChatTheme.accentBackground)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(ChatTheme.accent.opacity(0.18)).frame(height: 0.5)
-        }
+        .modifier(AppScreenHeader(title: space?.title ?? "Пространство", subtitle: "Пространство",
+                                  initials: state.conversation(spaceID)?.initials ?? "СП",
+                                  background: ChatTheme.accentBackground, onActivities: onActivities))
     }
 
     private func workPanel(_ space: ProductSpace) -> some View {
         VStack(spacing: 0) {
             areaHeading("В пространстве")
-            RestoringSpaceList(scrollID: $presentation.workScrollID, coordinate: workCoordinate) {
+            RestoringSpaceList(scrollID: $presentation.workScrollID, coordinate: workCoordinate, orderedIDs: workIDs) {
                 workSections(space, coordinate: workCoordinate)
             }
         }
@@ -85,28 +52,25 @@ struct SpaceHomeView: View {
 
     private var personalPanel: some View {
         VStack(spacing: 0) {
-            areaHeading("Личные сообщения", subtitle: "Последние 5 диалогов")
-            RestoringSpaceList(scrollID: $presentation.personalScrollID, coordinate: personalCoordinate) {
-                personalRows(coordinate: personalCoordinate)
+            personalHeading
+            if presentation.personalExpanded {
+                RestoringSpaceList(scrollID: $presentation.personalScrollID, coordinate: personalCoordinate) {
+                    personalRows(coordinate: personalCoordinate)
+                }
             }
         }
     }
 
     private func combinedList(_ space: ProductSpace) -> some View {
-        RestoringSpaceList(scrollID: $presentation.combinedScrollID, coordinate: combinedCoordinate) {
-            identityHeader(space)
-                .listRowInsets(EdgeInsets())
-                .listRowSeparator(.hidden)
-                .id(spaceID)
-                .modifier(VisibleSpaceRow(id: spaceID, coordinate: combinedCoordinate))
+        RestoringSpaceList(scrollID: $presentation.combinedScrollID, coordinate: combinedCoordinate, orderedIDs: workIDs) {
             areaHeading("В пространстве")
                 .listRowInsets(EdgeInsets())
                 .listRowSeparator(.hidden)
             workSections(space, coordinate: combinedCoordinate)
             Section {
-                personalRows(coordinate: combinedCoordinate)
+                if presentation.personalExpanded { personalRows(coordinate: combinedCoordinate) }
             } header: {
-                areaHeading("Личные сообщения", subtitle: "Последние 5 диалогов")
+                personalHeading
                     .padding(.horizontal, -16)
             }
             .textCase(nil)
@@ -134,11 +98,11 @@ struct SpaceHomeView: View {
     private func workSections(_ space: ProductSpace, coordinate: String) -> some View {
         if !state.conversations.contains(where: { $0.parentSpaceID == spaceID }) {
             emptyRow("В пространстве пока нет чатов и каналов")
-        } else {
-            ForEach(state.spaceConversations(spaceID)) { conversation in
+        }
+        ForEach(state.spaceConversations(spaceID)) { conversation in
                 conversationRow(conversation, coordinate: coordinate)
             }
-            ForEach(space.sections) { section in
+            ForEach(state.orderedSections(spaceID)) { section in
                 Section {
                     if presentation.isExpanded(section.id) {
                         let conversations = state.spaceConversations(spaceID, sectionID: section.id)
@@ -157,43 +121,104 @@ struct SpaceHomeView: View {
                 }
                 .textCase(nil)
             }
+    }
+
+    private var workIDs: [UUID] {
+        state.spaceConversations(spaceID).map(\.id) + state.orderedSections(spaceID).flatMap { section in
+            [section.id] + (presentation.isExpanded(section.id) ? state.spaceConversations(spaceID, sectionID: section.id).map(\.id) : [])
         }
+    }
+
+    private var personalHeading: some View {
+        Button { presentation.personalExpanded.toggle() } label: {
+            HStack(spacing: 8) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        Text("Личные сообщения").font(.headline)
+                        Text("вне пространства").font(.caption).foregroundStyle(ChatTheme.secondaryText)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Личные сообщения").font(.headline)
+                        Text("вне пространства").font(.caption).foregroundStyle(ChatTheme.secondaryText)
+                    }
+                }
+                Spacer(minLength: 0)
+                Image(systemName: presentation.personalExpanded ? "chevron.down" : "chevron.right")
+                    .foregroundStyle(ChatTheme.secondaryText)
+            }
+            .foregroundStyle(ChatTheme.primaryText)
+            .padding(.horizontal, 16).padding(.vertical, 8).frame(minHeight: 44)
+            .background(.white)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Личные сообщения, вне пространства")
+        .accessibilityValue(presentation.personalExpanded ? "Развёрнут" : "Свёрнут")
     }
 
     private func sectionHeading(_ section: SpaceSection) -> some View {
         let expanded = presentation.isExpanded(section.id)
-        let unread = state.sectionUnreadCount(spaceID, sectionID: section.id)
-        let mentions = state.sectionMentionCount(spaceID, sectionID: section.id)
-        return Button {
-            presentation.toggleSection(section.id)
-        } label: {
-            HStack(spacing: 8) {
-                Text(section.title).font(.headline).foregroundStyle(ChatTheme.primaryText)
-                Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(ChatTheme.secondaryText)
-                Spacer(minLength: 8)
-                if mentions > 0 {
-                    Text("@").font(.body.weight(.semibold)).foregroundStyle(ChatTheme.accent)
+        let ids = state.orderedSections(spaceID).map(\.id)
+        return HStack(spacing: 4) {
+            Button { presentation.toggleSection(section.id) } label: {
+                HStack(spacing: 8) {
+                    Text(section.title).font(.headline).foregroundStyle(ChatTheme.primaryText)
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.caption).foregroundStyle(ChatTheme.secondaryText)
+                    Spacer(minLength: 8)
+                    if state.sectionMentionCount(spaceID, sectionID: section.id) > 0 {
+                        Text("@").foregroundStyle(ChatTheme.accent)
+                    }
+                    UnreadBadge(count: state.sectionUnreadCount(spaceID, sectionID: section.id))
                 }
-                if unread > 0 {
-                    Text("\(unread)")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .frame(minWidth: 20, minHeight: 20)
-                        .background(ChatTheme.accent, in: Capsule())
-                        .fixedSize()
-                }
+                .frame(minHeight: 44).contentShape(Rectangle())
             }
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .accessibilityLabel("Раздел \(section.title)")
+            .accessibilityValue("\(expanded ? "Развёрнут" : "Свёрнут"). Непрочитанных: \(state.sectionUnreadCount(spaceID, sectionID: section.id)). Упоминаний: \(state.sectionMentionCount(spaceID, sectionID: section.id))")
+            reorderHandle(id: section.id, ids: ids, section: true, title: section.title)
         }
-        .buttonStyle(.plain)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Раздел \(section.title)")
-        .accessibilityValue("\(expanded ? "Развёрнут" : "Свёрнут"). Непрочитанных: \(unread). Упоминаний вас: \(mentions)")
-        .accessibilityHint("Двойное нажатие раскрывает или сворачивает раздел")
+        .modifier(SpaceDropTarget(accepts: activeDragToken?.hasPrefix("section|\(spaceID)|") == true) { token, after in
+            activeDragToken = nil
+            guard token.hasPrefix("section|\(spaceID)|"),
+                  let id = UUID(uuidString: String(token.split(separator: "|").last ?? "")) else { return false }
+            return state.moveSection(id, relativeTo: section.id, after: after, spaceID: spaceID)
+        })
+    }
+
+    private func reorderHandle(id: UUID, ids: [UUID], section: Bool, title: String) -> some View {
+        let index = ids.firstIndex(of: id) ?? 0
+        let token = "\(section ? "section" : "row")|\(spaceID)|\(id)"
+        return Menu {
+            Button("Переместить выше") { shift(id, ids: ids, down: false, section: section) }
+                .disabled(index == 0)
+            Button("Переместить ниже") { shift(id, ids: ids, down: true, section: section) }
+                .disabled(index >= ids.count - 1)
+        } label: {
+            Image(systemName: "line.3.horizontal").foregroundStyle(ChatTheme.secondaryText)
+                .frame(width: 44, height: 44).contentShape(Rectangle())
+        }
+        .onDrag {
+            activeDragToken = token
+            return NSItemProvider(object: token as NSString)
+        } preview: {
+            Label(title, systemImage: "line.3.horizontal")
+                .padding(10).background(.white, in: RoundedRectangle(cornerRadius: 12))
+        }
+        .accessibilityLabel("Порядок: \(title)")
+        .accessibilityValue("Позиция \(index + 1) из \(ids.count)")
+        .accessibilityHint("Удерживайте для перетаскивания или откройте меню перестановки")
+        .accessibilityActions {
+            if index > 0 { Button("Переместить выше") { shift(id, ids: ids, down: false, section: section) } }
+            if index < ids.count - 1 { Button("Переместить ниже") { shift(id, ids: ids, down: true, section: section) } }
+        }
+    }
+
+    private func shift(_ id: UUID, ids: [UUID], down: Bool, section: Bool) {
+        guard let index = ids.firstIndex(of: id) else { return }
+        let next = index + (down ? 1 : -1)
+        guard ids.indices.contains(next) else { return }
+        if section { state.moveSection(id, relativeTo: ids[next], after: down, spaceID: spaceID) }
+        else { state.moveRow(id, relativeTo: ids[next], after: down) }
     }
 
     @ViewBuilder
@@ -208,17 +233,21 @@ struct SpaceHomeView: View {
     }
 
     private func conversationRow(_ conversation: Conversation, coordinate: String) -> some View {
-        Button {
-            onOpen(conversation)
-        } label: {
-            ConversationRow(conversation: conversation,
-                            parentSpaceTitle: conversation.isChild ? space?.title : nil,
-                            showMentions: true,
-                            isParentMuted: conversation.isChild && state.conversation(spaceID)?.isMuted == true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+        HStack(spacing: 0) {
+            Button { onOpen(conversation) } label: {
+                ConversationRow(conversation: conversation,
+                                parentSpaceTitle: conversation.isChild ? space?.title : nil,
+                                showMentions: true,
+                                isParentMuted: conversation.isChild && state.conversation(spaceID)?.isMuted == true)
+                    .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if let sectionID = conversation.sectionID {
+                reorderHandle(id: conversation.id,
+                              ids: state.spaceConversations(spaceID, sectionID: sectionID).map(\.id),
+                              section: false, title: conversation.title)
+            }
         }
-        .buttonStyle(.plain)
         .id(conversation.id)
         .accessibilityHint(conversation.isPersonal ? "Открыть личный диалог" : "Открыть диалог в пространстве")
         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
@@ -228,6 +257,19 @@ struct SpaceHomeView: View {
                                   onRead: { state.markRead(conversation.id) },
                                   onMute: { state.toggleMuted(conversation.id) }))
         .modifier(VisibleSpaceRow(id: conversation.id, coordinate: coordinate))
+        .modifier(SpaceDropTarget(accepts: acceptsRowDrag(conversation)) { token, after in
+            activeDragToken = nil
+            guard conversation.sectionID != nil, token.hasPrefix("row|\(spaceID)|"),
+                  let id = UUID(uuidString: String(token.split(separator: "|").last ?? "")) else { return false }
+            return state.moveRow(id, relativeTo: conversation.id, after: after)
+        })
+    }
+
+    private func acceptsRowDrag(_ destination: Conversation) -> Bool {
+        guard let token = activeDragToken, token.hasPrefix("row|\(spaceID)|"),
+              let id = UUID(uuidString: String(token.split(separator: "|").last ?? "")),
+              let source = state.conversation(id), let sectionID = destination.sectionID else { return false }
+        return source.parentSpaceID == destination.parentSpaceID && source.sectionID == sectionID
     }
 
     private func emptyRow(_ text: String) -> some View {
@@ -241,16 +283,20 @@ struct SpaceHomeView: View {
 }
 
 /// Native List retains swipe actions; the saved visible ID restores each area's scroll.
-private struct RestoringSpaceList<Content: View>: View {
+struct RestoringSpaceList<Content: View>: View {
     @Binding var scrollID: UUID?
     let coordinate: String
     let content: () -> Content
+    let orderedIDs: [UUID]
+    @State private var edgeDirection = 0
+    @State private var lastVisibleWorkID: UUID?
     @State private var isRestoring = true
 
-    init(scrollID: Binding<UUID?>, coordinate: String, @ViewBuilder content: @escaping () -> Content) {
+    init(scrollID: Binding<UUID?>, coordinate: String, orderedIDs: [UUID] = [], @ViewBuilder content: @escaping () -> Content) {
         _scrollID = scrollID
         self.coordinate = coordinate
         self.content = content
+        self.orderedIDs = orderedIDs
     }
 
     var body: some View {
@@ -266,6 +312,8 @@ private struct RestoringSpaceList<Content: View>: View {
                             $0.value.rect.maxY > 0 && $0.value.rect.minY < viewport.size.height
                         }
                         // A sticky section header must not reset a deep scroll to its first row.
+                        let workFrames = visible.filter { orderedIDs.contains($0.key) }
+                        lastVisibleWorkID = workFrames.max(by: { $0.value.rect.maxY < $1.value.rect.maxY })?.key
                         let rows = visible.filter { !$0.value.isSectionHeader }
                         let candidates = rows.isEmpty ? visible : rows
                         if let first = candidates.min(by: { $0.value.rect.minY < $1.value.rect.minY })?.key,
@@ -278,9 +326,77 @@ private struct RestoringSpaceList<Content: View>: View {
                         if let saved { proxy.scrollTo(saved, anchor: .top) }
                         isRestoring = false
                     }
-                    .onDisappear { isRestoring = true }
+                    .overlay(alignment: .top) { edgeZone(-1) }
+                    .overlay(alignment: .bottom) { edgeZone(1) }
+                    .task(id: edgeDirection) {
+                        let direction = edgeDirection
+                        guard direction != 0 else { return }
+                        let startingID = direction > 0 ? lastVisibleWorkID : scrollID
+                        guard let startingID, var index = orderedIDs.firstIndex(of: startingID) else { return }
+                        while !Task.isCancelled && edgeDirection == direction {
+                            index += direction
+                            guard orderedIDs.indices.contains(index) else { break }
+                            withAnimation { proxy.scrollTo(orderedIDs[index], anchor: direction < 0 ? .top : .bottom) }
+                            try? await Task.sleep(for: .milliseconds(350))
+                        }
+                    }
+                    .onDisappear { isRestoring = true; edgeDirection = 0 }
             }
         }
+    }
+    @ViewBuilder private func edgeZone(_ direction: Int) -> some View {
+        if !orderedIDs.isEmpty {
+            Color.clear.frame(height: 16)
+                .onDrop(of: [UTType.text], isTargeted: Binding(
+                    get: { edgeDirection == direction },
+                    set: { edgeDirection = $0 ? direction : 0 })) { _ in false }
+                .accessibilityHidden(true)
+        }
+    }
+
+}
+
+private struct SpaceDropTarget: ViewModifier {
+    let accepts: Bool
+    let commit: (String, Bool) -> Bool
+    @State private var targeted = false
+    @State private var after = false
+    @State private var height: CGFloat = 44
+    func body(content: Content) -> some View {
+        content
+            .background { GeometryReader { geometry in Color.clear.onAppear { height = geometry.size.height }
+                .onChange(of: geometry.size.height) { _, value in height = value } } }
+            .overlay(alignment: after ? .bottom : .top) {
+                if targeted && accepts { ChatTheme.accent.frame(height: 2).allowsHitTesting(false) }
+            }
+            .onDrop(of: [UTType.text], delegate: SpaceReorderDropDelegate(accepts: accepts,
+                    height: height, targeted: $targeted, after: $after, commit: commit))
+    }
+}
+
+private struct SpaceReorderDropDelegate: DropDelegate {
+    let accepts: Bool
+    let height: CGFloat
+    @Binding var targeted: Bool
+    @Binding var after: Bool
+    let commit: (String, Bool) -> Bool
+
+    func validateDrop(info: DropInfo) -> Bool { accepts && info.hasItemsConforming(to: [UTType.text]) }
+    func dropEntered(info: DropInfo) { targeted = true; after = info.location.y > height / 2 }
+    func dropExited(info: DropInfo) { targeted = false }
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        after = info.location.y > height / 2
+        return DropProposal(operation: accepts ? .move : .forbidden)
+    }
+    func performDrop(info: DropInfo) -> Bool {
+        targeted = false
+        guard accepts, let provider = info.itemProviders(for: [UTType.text]).first else { return false }
+        let insertAfter = info.location.y > height / 2
+        _ = provider.loadObject(ofClass: NSString.self) { value, _ in
+            guard let value = value as? String else { return }
+            DispatchQueue.main.async { _ = commit(value, insertAfter) }
+        }
+        return true
     }
 }
 
@@ -297,7 +413,7 @@ private struct SpaceRowFrames: PreferenceKey {
     }
 }
 
-private struct VisibleSpaceRow: ViewModifier {
+struct VisibleSpaceRow: ViewModifier {
     let id: UUID
     let coordinate: String
     var isSectionHeader = false

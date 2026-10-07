@@ -90,6 +90,7 @@ struct Conversation: Identifiable, Equatable {
     let sectionID: UUID?
     let isPersonal: Bool
     let isListedOnMain: Bool
+    let hasTeamResources: Bool
     var lastMessageAt: Date?
     var unreadMentionCount: Int
     var unreadCount: Int
@@ -123,7 +124,7 @@ struct Conversation: Identifiable, Equatable {
     init(id: UUID = UUID(), title: String, sender: String? = nil, message: String,
          time: String, initials: String, avatarTint: AvatarTint, space: ProductSpace? = nil,
          parentSpaceID: UUID? = nil, kind: ConversationKind = .chat, section: String? = nil,
-         sectionID: UUID? = nil, isPersonal: Bool = false, isListedOnMain: Bool = true,
+         sectionID: UUID? = nil, isPersonal: Bool = false, isListedOnMain: Bool = true, hasTeamResources: Bool = false,
          lastMessageAt: Date? = nil, unreadMentionCount: Int = 0, unreadCount: Int = 0, isPinned: Bool = false, isMuted: Bool = false, order: Int) {
         self.id = id
         self.title = title
@@ -139,6 +140,7 @@ struct Conversation: Identifiable, Equatable {
         self.sectionID = sectionID
         self.isPersonal = isPersonal
         self.isListedOnMain = isListedOnMain
+        self.hasTeamResources = hasTeamResources
         self.lastMessageAt = lastMessageAt
         self.unreadMentionCount = unreadMentionCount
         self.unreadCount = unreadCount
@@ -197,7 +199,7 @@ struct Conversation: Identifiable, Equatable {
         Conversation(id: demoID(206), title: "Разработка", message: "Документация обновлена",
                      time: "вчера", initials: "Р", avatarTint: .teal,
                      parentSpaceID: ProductSpace.sber.id, kind: .channel, section: "Почта",
-                     sectionID: ProductSpace.sber.sections[1].id, isMuted: true, order: 1),
+                     sectionID: ProductSpace.sber.sections[1].id, hasTeamResources: true, isMuted: true, order: 1),
         Conversation(id: demoID(207), title: "QA", message: "Чек-лист согласован",
                      time: "вчера", initials: "QA", avatarTint: .accent,
                      parentSpaceID: ProductSpace.sber.id, kind: .channel, section: "Почта",
@@ -230,6 +232,10 @@ enum AppRoute: Hashable {
     case space(UUID)
     case dialogue(spaceID: UUID, conversationID: UUID, kind: ConversationKind)
     case personalDialogue(UUID)
+    case conversation(UUID)
+    case message(conversationID: UUID, messageID: UUID, reply: Bool)
+    case thread(UUID, composing: Bool)
+    case resource(conversationID: UUID, resourceID: UUID, sessionID: UUID?)
     case activities
 }
 
@@ -241,7 +247,11 @@ struct AppNavigationState {
         path.append(route)
     }
 
-    mutating func openActivities() { open(.activities) }
+    mutating func openActivities() {
+        guard path.last != .activities else { return }
+        path.removeAll { $0 == .activities }
+        open(.activities)
+    }
 
     mutating func goBack() {
         guard !path.isEmpty else { return }
@@ -252,11 +262,20 @@ struct AppNavigationState {
 /// Shared by all window sizes. Children stay in the model when read or muted.
 struct ChatListState {
     private(set) var conversations: [Conversation]
+    var activity: ActivityStore
+    var structureOrder = SpaceStructureOrder()
     var query = ""
     var filter: ChatFilter = .all
 
     init(conversations: [Conversation] = Conversation.samples) {
         self.conversations = conversations
+        self.activity = ActivityStore(conversations: conversations)
+        for index in self.conversations.indices where !self.conversations[index].isSpace {
+            let id = self.conversations[index].id
+            self.conversations[index].unreadMentionCount = activity.messages.filter {
+                $0.conversationID == id && $0.isUnread && $0.mentionsMe
+            }.count
+        }
         recalculateSpaceCounts()
     }
 
@@ -311,8 +330,8 @@ struct ChatListState {
         guard self.conversation(conversation.id) != nil else { return nil }
         if conversation.isSpace { return .space(conversation.id) }
         if conversation.isPersonal && !conversation.isChild { return .personalDialogue(conversation.id) }
-        guard let parentID = conversation.parentSpaceID,
-              self.conversation(parentID)?.isSpace == true else { return nil }
+        guard let parentID = conversation.parentSpaceID else { return .conversation(conversation.id) }
+        guard self.conversation(parentID)?.isSpace == true else { return nil }
         return .dialogue(spaceID: parentID, conversationID: conversation.id, kind: conversation.kind)
     }
 
@@ -320,6 +339,7 @@ struct ChatListState {
         guard let target = conversation(id) else { return }
         for index in conversations.indices {
             if conversations[index].id == id || (target.isSpace && conversations[index].parentSpaceID == id) {
+                activity.markConversationRead(conversations[index].id)
                 conversations[index].unreadCount = 0
                 conversations[index].unreadMentionCount = 0
             }
@@ -341,6 +361,7 @@ struct ChatListState {
         for index in conversations.indices {
             conversations[index].unreadCount = 0
             conversations[index].unreadMentionCount = 0
+            activity.markConversationRead(conversations[index].id)
         }
     }
 
@@ -372,12 +393,13 @@ struct ChatListState {
 
     func spaceConversations(_ spaceID: UUID, sectionID: UUID? = nil) -> [Conversation] {
         guard conversation(spaceID)?.isSpace == true else { return [] }
-        return conversations.filter {
+        let rows = conversations.filter {
             $0.parentSpaceID == spaceID && $0.sectionID == sectionID
         }.sorted {
             if $0.order != $1.order { return $0.order < $1.order }
             return $0.id.uuidString < $1.id.uuidString
         }
+        return structureOrder.sortedRows(rows, spaceID: spaceID, sectionID: sectionID)
     }
 
     func sectionUnreadCount(_ spaceID: UUID, sectionID: UUID) -> Int {
@@ -399,7 +421,7 @@ struct ChatListState {
         }
     }
 
-    private mutating func recalculateSpaceCounts() {
+    mutating func recalculateSpaceCounts() {
         let totals = Dictionary(grouping: conversations.filter(\.isChild), by: { $0.parentSpaceID! })
             .mapValues { $0.reduce(0) { $0 + $1.unreadCount } }
         let mentions = Dictionary(grouping: conversations.filter(\.isChild), by: { $0.parentSpaceID! })
@@ -410,7 +432,7 @@ struct ChatListState {
         }
     }
 
-    private mutating func update(_ id: UUID, change: (inout Conversation) -> Void) {
+    mutating func update(_ id: UUID, change: (inout Conversation) -> Void) {
         guard let index = conversations.firstIndex(where: { $0.id == id }) else { return }
         change(&conversations[index])
     }
@@ -418,6 +440,7 @@ struct ChatListState {
 
 /// Stored above the navigation destination so returning preserves this space's presentation.
 struct SpaceHomeState {
+    var personalExpanded = true
     private(set) var collapsedSectionIDs: Set<UUID> = []
     var workScrollID: UUID?
     var personalScrollID: UUID?

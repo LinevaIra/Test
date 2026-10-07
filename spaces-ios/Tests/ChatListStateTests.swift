@@ -247,7 +247,8 @@ final class ChatListStateTests: XCTestCase {
         }
         let anna = try XCTUnwrap(state.conversations.first { $0.title == "Анна Смирнова" })
         XCTAssertEqual(state.route(for: anna), .personalDialogue(anna.id))
-        XCTAssertNil(state.route(for: try XCTUnwrap(state.conversations.first { $0.title == "Команда продукта" })))
+        let group = try XCTUnwrap(state.conversations.first { $0.title == "Команда продукта" })
+        XCTAssertEqual(state.route(for: group), .conversation(group.id))
     }
 
     func testActivitiesReturnToTheExactSourceAndDoNotDuplicate() throws {

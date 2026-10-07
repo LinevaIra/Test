@@ -4,6 +4,8 @@ struct ContentView: View {
     @State private var state = ChatListState()
     @State private var navigation = AppNavigationState()
     @State private var spacePresentations: [UUID: SpaceHomeState] = [:]
+    @State private var dialoguePresentations: [String: DialoguePresentation] = [:]
+    @State private var activitiesPresentation = ActivitiesPresentation()
     @State private var isCreatingChat = false
     @State private var newChatName = ""
 
@@ -16,6 +18,7 @@ struct ContentView: View {
             .background(.white)
             .navigationTitle("Чаты")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.visible, for: .navigationBar)
             .toolbarBackground(.white, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .searchable(text: $state.query, placement: .navigationBarDrawer(displayMode: .always),
@@ -30,6 +33,9 @@ struct ContentView: View {
                         }
                         Button {
                             state.restore()
+                            spacePresentations = [:]
+                            dialoguePresentations = [:]
+                            activitiesPresentation = ActivitiesPresentation()
                         } label: {
                             Label("Восстановить список", systemImage: "arrow.counterclockwise")
                         }
@@ -188,20 +194,55 @@ struct ContentView: View {
                               if let route = state.route(for: conversation) { navigation.open(route) }
                           }, onActivities: { navigation.openActivities() })
         case .dialogue(let spaceID, let conversationID, let kind):
-            if let space = state.conversation(spaceID)?.space,
-               let conversation = state.conversation(conversationID),
+            if let conversation = state.conversation(conversationID),
                conversation.parentSpaceID == spaceID, conversation.kind == kind {
-                DialogueEntryView(space: space, conversation: conversation) {
-                    navigation.openActivities()
-                }
-            }
-        case .personalDialogue(let id):
-            if let conversation = state.conversation(id), conversation.isPersonal, !conversation.isChild {
-                PersonalDialogueEntryView(conversation: conversation) { navigation.openActivities() }
-            }
+                dialogue(conversationID)
+            } else { unavailable }
+        case .personalDialogue(let id), .conversation(let id):
+            if state.conversation(id) != nil { dialogue(id) } else { unavailable }
+        case .message(let conversationID, let messageID, let reply):
+            if let message = state.activity.message(messageID), message.conversationID == conversationID {
+                DialogueView(conversationID: conversationID, state: $state,
+                             presentation: dialoguePresentation(message.threadID.map { "thread.\($0)" } ?? "message.\(messageID)"),
+                             focusedMessageID: messageID, composing: reply,
+                             onOpen: { navigation.open($0) }, onActivities: { navigation.openActivities() })
+            } else { unavailable }
+        case .thread(let id, let composing):
+            if let thread = state.activity.discussion(id) {
+                DialogueView(conversationID: thread.conversationID, state: $state,
+                             presentation: dialoguePresentation("thread.\(id)"), initialThreadID: id,
+                             composing: composing, onOpen: { navigation.open($0) },
+                             onActivities: { navigation.openActivities() })
+            } else { unavailable }
+        case .resource(let conversationID, let resourceID, let sessionID):
+            if let resource = state.activity.resource(resourceID), resource.isAccessible,
+               resource.conversationID == conversationID, state.conversation(conversationID) != nil,
+               sessionID == nil || sessionID.flatMap({ state.activity.session($0)?.resourceID }) == resourceID {
+                DialogueView(conversationID: conversationID, state: $state,
+                             presentation: dialoguePresentation("conversation.\(conversationID)"),
+                             focusedResourceID: resourceID, selectedSessionID: sessionID,
+                             onOpen: { navigation.open($0) }, onActivities: { navigation.openActivities() })
+            } else { unavailable }
         case .activities:
-            ActivitiesEntryView()
+            ActivitiesView(state: $state, presentation: $activitiesPresentation,
+                           onOpen: { navigation.open($0) })
         }
+    }
+
+    private var unavailable: some View {
+        ContentUnavailableView("Ресурс недоступен", systemImage: "exclamationmark.bubble")
+            .modifier(AppScreenHeader(title: "Недоступно", onActivities: { navigation.openActivities() }))
+    }
+
+    private func dialogue(_ id: UUID) -> some View {
+        DialogueView(conversationID: id, state: $state,
+                     presentation: dialoguePresentation("conversation.\(id)"),
+                     onOpen: { navigation.open($0) }, onActivities: { navigation.openActivities() })
+    }
+
+    private func dialoguePresentation(_ key: String) -> Binding<DialoguePresentation> {
+        Binding(get: { dialoguePresentations[key, default: DialoguePresentation()] },
+                set: { dialoguePresentations[key] = $0 })
     }
 
     private func spacePresentation(for id: UUID) -> Binding<SpaceHomeState> {
@@ -259,64 +300,7 @@ struct ContentView: View {
     }
 }
 
-// Dialogue content awaits its own specification; IDs and source context already route correctly.
-private struct PersonalDialogueEntryView: View {
-    let conversation: Conversation
-    let onActivities: () -> Void
-
-    var body: some View {
-        Color.white
-            .ignoresSafeArea()
-            .accessibilityLabel("Личный диалог \(conversation.title)")
-            .accessibilityIdentifier("personal-dialogue.\(conversation.id.uuidString)")
-            .modifier(EntryHeader(title: conversation.title, onActivities: onActivities))
-    }
-}
-
-private struct DialogueEntryView: View {
-    let space: ProductSpace
-    let conversation: Conversation
-    let onActivities: () -> Void
-
-    var body: some View {
-        Color.white
-            .ignoresSafeArea()
-            .accessibilityLabel("\(conversation.kind.rawValue) \(conversation.title), в пространстве \(space.title)")
-            .accessibilityIdentifier("dialogue.\(conversation.id.uuidString)")
-            .modifier(EntryHeader(title: space.title, onActivities: onActivities))
-    }
-}
-
-private struct ActivitiesEntryView: View {
-    var body: some View {
-        Color.white
-            .ignoresSafeArea()
-            .modifier(EntryHeader(title: "Активности"))
-    }
-}
-
-struct EntryHeader: ViewModifier {
-    let title: String
-    var onActivities: (() -> Void)? = nil
-    var background: Color = .white
-
-    func body(content: Content) -> some View {
-        content
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(background, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbar {
-                if let onActivities {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        ActivitiesButton(action: onActivities)
-                    }
-                }
-            }
-    }
-}
-
-private struct ActivitiesButton: View {
+struct ActivitiesButton: View {
     let action: () -> Void
 
     var body: some View {
